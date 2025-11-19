@@ -406,6 +406,7 @@ def list_document_minimal(params: BrowseParams, limit: int = 200) -> Tuple[List[
             "doc_date": (doc_map.get(did, {}) or {}).get("doc_date"),
             "is_active": (doc_map.get(did, {}) or {}).get("is_active"),
             "doc_kind": (doc_map.get(did, {}) or {}).get("doc_kind"),
+            "doc_url": (doc_map.get(did, {}) or {}).get("doc_url"),
         }
         for did in selected
     ]
@@ -462,6 +463,7 @@ def list_doc_ids_via_fts(
                 "doc_date": (doc_map.get(did, {}) or {}).get("doc_date"),
                 "is_active": (doc_map.get(did, {}) or {}).get("is_active"),
                 "doc_kind": (doc_map.get(did, {}) or {}).get("doc_kind"),
+                "doc_url": (doc_map.get(did, {}) or {}).get("doc_url"),
             }
             for did in ids
         ]
@@ -498,6 +500,7 @@ def list_doc_ids_via_fts(
             "doc_date": (doc_map.get(did, {}) or {}).get("doc_date"),
             "is_active": (doc_map.get(did, {}) or {}).get("is_active"),
             "doc_kind": (doc_map.get(did, {}) or {}).get("doc_kind"),
+            "doc_url": (doc_map.get(did, {}) or {}).get("doc_url"),
         }
         for did in ids
     ]

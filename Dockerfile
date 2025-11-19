@@ -11,10 +11,11 @@ RUN apt-get update \
 WORKDIR /app
 
 # Install python dependencies
+# Qdrant 1.15.5 – dobieramy kompatybilnego klienta HTTP (1.x)
 RUN pip install --no-cache-dir \
     fastapi \
     uvicorn[standard] \
-    qdrant-client \
+    qdrant-client==1.7.0 \
     openai \
     pydantic \
     pydantic-settings \

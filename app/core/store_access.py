@@ -127,6 +127,7 @@ def fetch_doc_summaries(doc_ids: List[str]) -> Dict[str, Dict[str, Any]]:
                     "doc_title": payload.get("title"),
                     "doc_date": payload.get("doc_date"),
                     "is_active": payload.get("is_active"),
+                    "doc_url": payload.get("doc_url"),
                 }
             if offset is None:
                 break
@@ -198,4 +199,3 @@ def truncate_head_tail(text: str, limit: int) -> str:
     head = int(limit * 0.7)
     tail = max(0, int(limit) - head)
     return (t[:head] + "\n...\n" + t[-tail:]).strip()
-

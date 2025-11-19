@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import csv
 import inspect
 import io
 import json
@@ -232,6 +233,76 @@ def _scan_files(base: pathlib.Path, pattern: str, recursive: bool) -> List[pathl
     return [p for p in iterator if p.is_file() and p.suffix.lower() in SUPPORTED_EXT]
 
 
+def _normalize_filename_key(name: str) -> str:
+    """Placeholder for future filename key normalization used in link mapping."""
+    return name
+
+
+def _load_doc_url_map(base_dir: pathlib.Path) -> Dict[str, str]:
+    """Load mapping: normalized filename stem -> doc_url from CSV in corpus root.
+
+    CSV is expected to reside in the corpus base directory under the fixed name
+    'wikamp_normative_acts_map_doc.csv' and contain at least columns:
+    - filename
+    - posturl
+
+    Selection rules per stem:
+    - Prefer entries where filename ends with .doc or .docx (take first).
+    - If none, but other entries exist:
+      - Prefer .pdf (take first),
+      - Otherwise take the first available entry.
+    """
+    mapping: Dict[str, str] = {}
+    csv_path = base_dir / "wikamp_normative_acts_map_doc.csv"
+    if not csv_path.exists():
+        logger.info("Doc URL map CSV not found in corpus root | path=%s", csv_path)
+        return mapping
+    try:
+        rows_per_key: Dict[str, List[Dict[str, str]]] = {}
+        with csv_path.open("r", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh, delimiter=";")
+            for row in reader:
+                filename = (row.get("filename") or "").strip()
+                posturl = (row.get("posturl") or "").strip()
+                if not filename or not posturl:
+                    continue
+                name_obj = pathlib.Path(filename)
+                stem = _normalize_filename_key(name_obj.stem)
+                if not stem:
+                    continue
+                ext = name_obj.suffix.lower()
+                rows_per_key.setdefault(stem, []).append(
+                    {
+                        "ext": ext,
+                        "posturl": posturl,
+                    }
+                )
+        total_rows = sum(len(v) for v in rows_per_key.values())
+        for stem, rows in rows_per_key.items():
+            doc_like = [r for r in rows if r["ext"] in {".doc", ".docx"}]
+            chosen: Optional[Dict[str, str]]
+            if doc_like:
+                chosen = doc_like[0]
+            else:
+                pdf_like = [r for r in rows if r["ext"] == ".pdf"]
+                if pdf_like:
+                    chosen = pdf_like[0]
+                else:
+                    chosen = rows[0] if rows else None
+            if chosen:
+                mapping[stem] = chosen["posturl"]
+        logger.info(
+            "Doc URL map loaded | csv_path=%s rows=%d keys=%d",
+            csv_path,
+            int(total_rows),
+            int(len(mapping)),
+        )
+    except Exception as exc:
+        logger.warning("Doc URL map load failed | path=%s error=%s", csv_path, exc)
+        return {}
+    return mapping
+
+
 # Iterate ingest records: chunks + LLM summary (+ cached vectors) per file.
 def _iter_document_records(
     file_paths: List[pathlib.Path],
@@ -241,6 +312,7 @@ def _iter_document_records(
     force_regen_summary: bool,
     collection_base: Optional[str],
     dedupe_on_ingest: bool,
+    doc_url_map: Optional[Dict[str, str]] = None,
     stats: Optional[Dict[str, int]] = None,
 ) -> Iterable[Dict[str, Any]]:
     """Yield ingest records for each document (chunks + summary + vectors).
@@ -251,6 +323,20 @@ def _iter_document_records(
     for path in file_paths:
         doc_start = time.time()
         logger.debug("Processing document %s", path)
+        # Try to attach external source URL based on filename stem
+        doc_url: Optional[str] = None
+        try:
+            stem = _normalize_filename_key(path.stem)
+            if doc_url_map is not None and stem in doc_url_map:
+                doc_url = doc_url_map[stem]
+                if stats is not None:
+                    stats["doc_url_matched"] = int(stats.get("doc_url_matched", 0)) + 1
+            else:
+                if stats is not None:
+                    stats["doc_url_missing"] = int(stats.get("doc_url_missing", 0)) + 1
+        except Exception:
+            if stats is not None:
+                stats["doc_url_missing"] = int(stats.get("doc_url_missing", 0)) + 1
         # Compute content hash up front to enable early dedupe
         content_sha256 = compute_file_sha256(path)
         if dedupe_on_ingest:
@@ -373,6 +459,7 @@ def _iter_document_records(
         rec = {
             "doc_id": doc_id,
             "path": str(path.resolve()),
+            "doc_url": doc_url,
             "chunks": chunks,
             "doc_title": doc_title,
             "subtitle": str(doc_sum.get("subtitle", "brak") or "brak"),
@@ -1225,6 +1312,8 @@ def ingest_build(req: IngestBuildRequest):
         raise HTTPException(status_code=400, detail="base_dir nie istnieje")
 
     file_paths = _scan_files(base, req.glob, req.recursive)
+    # Pre-load external document URLs map from CSV in corpus root
+    doc_url_map = _load_doc_url_map(base)
     logger.debug("Found %d files for ingest", len(file_paths))
     if not file_paths:
         return {"ok": True, "indexed": 0, "took_ms": int((time.time() - t0) * 1000)}
@@ -1244,6 +1333,7 @@ def ingest_build(req: IngestBuildRequest):
                 force_regen_summary=req.force_regen_summary,
                 collection_base=req.collection_name,
                 dedupe_on_ingest=bool(settings.dedupe_on_ingest),
+                doc_url_map=doc_url_map,
                 stats=stats,
             ):
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -1286,10 +1376,12 @@ def ingest_build(req: IngestBuildRequest):
 
     took_ms = int((time.time() - t0) * 1000)
     logger.debug(
-        "Ingest build finished | documents=%d points=%d duplicates_skipped=%d took_ms=%d",
+        "Ingest build finished | documents=%d points=%d duplicates_skipped=%d doc_url_matched=%d doc_url_missing=%d took_ms=%d",
         doc_count,
         point_count,
         int(stats.get("duplicates_skipped", 0)),
+        int(stats.get("doc_url_matched", 0)),
+        int(stats.get("doc_url_missing", 0)),
         took_ms,
     )
     return {

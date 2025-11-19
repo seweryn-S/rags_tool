@@ -1,4 +1,8 @@
-# rags_tool (2.43.0)
+# rags_tool (2.44.0)
+
+## Nowości w 2.44.0
+- Ingest: podczas wczytywania korpusu ładowana jest mapa linków WIKAMP z pliku `wikamp_normative_acts_map_doc.csv` znajdującego się w katalogu głównym korpusu. Linki są parowane po nazwie pliku (bez rozszerzenia) z priorytetem dla `.doc`/`.docx`, następnie `.pdf`, a na końcu pierwszego dostępnego wpisu.
+- Search/Browse: wyniki `/search/query` (hits/groups/blocks) oraz `/browse/doc-ids` zwracają dodatkowe pole `doc_url` z linkiem źródłowym dokumentu, które można cytować w odpowiedziach LLM.
 
 ## Nowości w 2.43.0
 - Usunięto endpoint `POST /browse/facets`. Dla list i liczby dokumentów korzystaj z `POST /browse/doc-ids` (pole `candidates_total`). Rozkłady/filtry twórz po stronie klienta na podstawie zwróconych metadanych (`is_active`, `doc_date`, `doc_kind`).

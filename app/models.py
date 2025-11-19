@@ -190,6 +190,7 @@ class SearchHit(BaseModel):
     title: Optional[str] = Field(default=None, description="Document title extracted during ingest.")
     doc_date: Optional[str] = Field(default=None, description="Document date (YYYY, YYYY-MM, or YYYY-MM-DD) or 'brak'.")
     is_active: Optional[bool] = Field(default=None, description="Whether the document is marked as current (true) or archival (false).")
+    doc_url: Optional[str] = Field(default=None, description="External source URL for the document (e.g., WIKAMP post).")
     section: Optional[str] = Field(default=None, description="Optional document section identifier, if present.")
     chunk_id: int = Field(..., description="Chunk index within the document (0-based).")
     score: float = Field(..., description="Hybrid relevance score (normalized according to score_norm).")
@@ -216,6 +217,7 @@ class SearchGroup(BaseModel):
     title: Optional[str] = Field(default=None, description="Document title extracted during ingest.")
     doc_date: Optional[str] = Field(default=None, description="Document date (YYYY, YYYY-MM, or YYYY-MM-DD) or 'brak'.")
     is_active: Optional[bool] = Field(default=None, description="Whether the document is marked as current (true) or archival (false).")
+    doc_url: Optional[str] = Field(default=None, description="External source URL for the document (e.g., WIKAMP post).")
     summary: Optional[str] = Field(default=None, description="Document-level summary (single copy per document).")
     score: float = Field(..., description="Max score among group's chunks.")
     chunks: List[SearchChunk] = Field(..., description="Chunk-level results belonging to this document.")
@@ -228,6 +230,7 @@ class MergedBlock(BaseModel):
     doc_date: Optional[str] = Field(default=None, description="Document date (YYYY, YYYY-MM, or YYYY-MM-DD) or 'brak'.")
     is_active: Optional[bool] = Field(default=None, description="Whether the document is marked as current (true) or archival (false).")
     section: Optional[str] = Field(default=None, description="Optional section identifier.")
+    doc_url: Optional[str] = Field(default=None, description="External source URL for the document (e.g., WIKAMP post).")
     first_chunk_id: int = Field(..., description="First chunk id (inclusive) in this merged block.")
     last_chunk_id: int = Field(..., description="Last chunk id (inclusive) in this merged block.")
     score: float = Field(..., description="Block score = max score among its member chunks.")
@@ -409,6 +412,7 @@ class DocListItem(BaseModel):
     doc_date: Optional[str] = Field(default=None, description="Document date (YYYY, YYYY-MM, or YYYY-MM-DD) or 'brak'.")
     is_active: Optional[bool] = Field(default=None, description="Whether the document is marked as current (true) or archival (false).")
     doc_kind: Optional[str] = Field(default=None, description="Coarse document kind inferred from title/signature (e.g., order, resolution, regulation).")
+    doc_url: Optional[str] = Field(default=None, description="External source URL for the document (e.g., WIKAMP post).")
 
 
 class DocsListResponse(BaseModel):

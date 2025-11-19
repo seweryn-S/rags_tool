@@ -389,6 +389,7 @@ def _fetch_doc_summaries(doc_ids: List[str]) -> Dict[str, Dict[str, Any]]:
                     "doc_title": payload.get("title"),
                     "doc_date": payload.get("doc_date"),
                     "is_active": payload.get("is_active"),
+                    "doc_url": payload.get("doc_url"),
                 }
             if offset is None:
                 break
@@ -447,6 +448,7 @@ def _stage1_select_documents(
             "title",
             "doc_date",
             "is_active",
+            "doc_url",
         ]
         if summary_sparse_query is not None and SPARSE_ENABLED:
             include_fields.extend(["summary_sparse_indices", "summary_sparse_values"])
@@ -492,6 +494,7 @@ def _stage1_select_documents(
                 "doc_title": payload.get("title"),
                 "doc_date": payload.get("doc_date"),
                 "is_active": payload.get("is_active"),
+                "doc_url": payload.get("doc_url"),
             }
 
         if not doc_map:
@@ -505,7 +508,17 @@ def _stage1_select_documents(
         hybrid_rel = [req.dense_weight * d + req.sparse_weight * s for d, s in zip(dense_norm, sparse_norm)]
     else:
         # Dual-query: dense + sparse, then fuse (no TF-IDF payload needed)
-        include_fields = ["doc_id", "path", "summary", "signature", "entities", "title", "doc_date", "is_active"]
+        include_fields = [
+            "doc_id",
+            "path",
+            "summary",
+            "signature",
+            "entities",
+            "title",
+            "doc_date",
+            "is_active",
+            "doc_url",
+        ]
         with_payload_dense = include_fields if settings.search_minimal_payload else True
         dense_hits = qdrant.search(
             collection_name=settings.qdrant_summary_collection,
@@ -554,6 +567,7 @@ def _stage1_select_documents(
                 "doc_title": p.get("title"),
                 "doc_date": p.get("doc_date"),
                 "is_active": p.get("is_active"),
+                "doc_url": p.get("doc_url"),
             }
         for r in sparse_hits:
             p = r.payload or {}
@@ -712,7 +726,7 @@ def _stage2_select_chunks(
         should=(flt.should if flt and getattr(flt, "should", None) else None),
         must_not=(flt.must_not if flt and getattr(flt, "must_not", None) else None),
     )
-    include_fields2 = ["doc_id", "chunk_id", "path", "section_path", "is_active"]
+    include_fields2 = ["doc_id", "chunk_id", "path", "section_path", "is_active", "doc_url"]
     dense_hits = qdrant.search(
         collection_name=settings.qdrant_content_collection,
         query_vector=(CONTENT_VECTOR_NAME, q_vec),
@@ -775,6 +789,8 @@ def _stage2_select_chunks(
                 p.setdefault("title", info.get("doc_title"))
             if info.get("doc_date") is not None:
                 p.setdefault("doc_date", info.get("doc_date"))
+            if info.get("doc_url") is not None:
+                p.setdefault("doc_url", info.get("doc_url"))
             if p.get("is_active") is None and info.get("is_active") is not None:
                 p.setdefault("is_active", info.get("is_active"))
         mmr_pool.append(
@@ -860,6 +876,8 @@ def _stage2_select_chunks(
                 payload.setdefault("title", doc_info.get("doc_title"))
             if doc_info.get("doc_date") is not None:
                 payload.setdefault("doc_date", doc_info.get("doc_date"))
+            if doc_info.get("doc_url") is not None:
+                payload.setdefault("doc_url", doc_info.get("doc_url"))
             if payload.get("is_active") is None and doc_info.get("is_active") is not None:
                 payload.setdefault("is_active", doc_info.get("is_active"))
         final_score = float(rel2[idx])
@@ -1235,6 +1253,7 @@ def _build_blocks_from_hits(
         title = base_payload.get("title")
         doc_date = base_payload.get("doc_date")
         is_active = base_payload.get("is_active")
+        doc_url = base_payload.get("doc_url")
         # Score sekcji = max score spośród jej trafień
         sect_score = max(float(h.get("score", 0.0)) for h in hits)
 
@@ -1309,6 +1328,7 @@ def _build_blocks_from_hits(
                 "last_chunk_id": int(last_cid if last_cid is not None else (base_payload.get("chunk_id", 0))),
                 "score": float(sect_score),
                 "summary": sum_val,
+                "doc_url": doc_url,
                 "text": merged_text,
             }
         )
@@ -1354,6 +1374,7 @@ def _shape_results(
                     "title": payload.get("title"),
                     "doc_date": payload.get("doc_date"),
                     "is_active": payload.get("is_active"),
+                    "doc_url": payload.get("doc_url"),
                     "summary": None if req.summary_mode == "none" else payload.get("summary"),
                     "score": float(fh.get("score", 0.0)),
                     "chunks": [],
@@ -1394,6 +1415,7 @@ def _shape_results(
                     "title": payload.get("title"),
                     "doc_date": payload.get("doc_date"),
                     "is_active": payload.get("is_active"),
+                    "doc_url": payload.get("doc_url"),
                     "section": payload.get("section_path"),
                     "chunk_id": payload.get("chunk_id", 0),
                     "score": float(fh.get("score", 0.0)),

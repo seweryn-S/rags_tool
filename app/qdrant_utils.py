@@ -1124,6 +1124,7 @@ def build_and_upsert_points(
     for rec in doc_records:
         doc_id = rec["doc_id"]
         path = rec["path"]
+        doc_url = rec.get("doc_url")
         chunks = rec["chunks"]
         doc_summary = rec["doc_summary"]
         doc_signature = rec["doc_signature"]
@@ -1223,6 +1224,8 @@ def build_and_upsert_points(
             "signature": doc_signature,
             "entities": doc_entities,
         }
+        if isinstance(doc_url, str) and doc_url.strip():
+            summary_payload["doc_url"] = doc_url.strip()
         # propagate content hash if available in record (used for dedupe)
         try:
             csha = str(rec.get("content_sha256"))
