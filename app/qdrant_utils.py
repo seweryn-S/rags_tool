@@ -98,7 +98,12 @@ def find_path_by_content_sha256(content_sha256: str, collection_base: Optional[s
     try:
         if not content_sha256:
             return None
-        summary_collection, _ = derive_collection_names(collection_base)
+        # Use alias-backed collection when available so cross-run dedupe
+        # always checks against the currently active corpus version.
+        try:
+            summary_collection, _ = derive_alias_names(collection_base)
+        except Exception:
+            summary_collection, _ = derive_collection_names(collection_base)
         flt = qm.Filter(
             must=[
                 qm.FieldCondition(key="point_type", match=qm.MatchValue(value="summary")),
@@ -178,6 +183,17 @@ def derive_collection_names(base: Optional[str] = None) -> Tuple[str, str]:
     return _derive_summary_collection(base), _derive_content_collection(base)
 
 
+def derive_alias_names(base: Optional[str] = None) -> Tuple[str, str]:
+    """Return (summary_alias, content_alias) for the provided base.
+
+    Aliases are derived from the physical collection names and suffixed with
+    '_active' so they can be atomically repointed to a new version of the
+    underlying collections during a full rebuild.
+    """
+    summary_collection, content_collection = derive_collection_names(base)
+    return f"{summary_collection}_active", f"{content_collection}_active"
+
+
 DEFAULT_PAYLOAD_INDEXES: Tuple[Tuple[str, Dict[str, Any]], ...] = (
     ("doc_id", {"type": "keyword"}),
     ("point_type", {"type": "keyword"}),
@@ -233,8 +249,10 @@ def _ensure_payload_indexes(
                 return PIP(type=tval)  # type: ignore[misc]
         except Exception:
             pass
-        # Fallback to plain dict
-        return {"type": str(schema_type)}
+        # Fallback for newer qdrant_client versions: pass plain string
+        # schema name (e.g. "keyword", "integer", "bool", "text"). This is
+        # compatible with CreateFieldIndex(field_schema: AnyPayloadFieldSchema).
+        return str(schema_type)
 
     for field_name, params in specs:
         try:
@@ -381,6 +399,43 @@ def ensure_collections(collection_base: Optional[str] = None, dim: Optional[int]
         content_sparse,
         payload_indexes=DEFAULT_PAYLOAD_INDEXES,
     )
+
+    # Best-effort: ensure aliases for this pair exist and point to some collection.
+    # Aliases are used as stable public names (e.g., *_active) that can be
+    # atomically repointed to new physical collections during full rebuilds.
+    summary_alias, content_alias = derive_alias_names(collection_base)
+    for alias_name, target in ((summary_alias, summary_collection), (content_alias, content_collection)):
+        try:
+            # Treat a successful get_collection as "alias or collection exists"
+            qdrant.get_collection(alias_name)
+            continue
+        except Exception:
+            pass
+        try:
+            base_url = settings.qdrant_url.rstrip("/")
+            url = f"{base_url}/collections/aliases"
+            payload = {
+                "actions": [
+                    {
+                        "create_alias": {
+                            "collection_name": target,
+                            "alias_name": alias_name,
+                        }
+                    }
+                ]
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = _urlreq.Request(url, data=data, method="POST", headers=_qdrant_headers_json())
+            with _urlreq.urlopen(req, timeout=settings.qdrant_request_timeout) as resp:
+                _ = resp.read()
+            logger.info("Ensured Qdrant alias '%s' -> '%s'", alias_name, target)
+        except Exception as exc:
+            logger.debug(
+                "Ensure alias skipped or failed | alias=%s target=%s error=%s",
+                alias_name,
+                target,
+                exc,
+            )
 
 
 # Export all collections and local TF‑IDF artifacts as a tar.gz archive.
@@ -636,6 +691,59 @@ def _delete_remote_snapshot(collection_name: str, snapshot_name: str) -> None:
     except Exception as exc:
         logger.debug("REST delete snapshot failed: %s", exc)
         return
+
+
+def swap_collection_aliases(
+    logical_base: Optional[str],
+    new_collection_base: str,
+) -> None:
+    """Atomically repoint summary/content aliases to a new physical pair.
+
+    logical_base:
+        Base name used for deriving alias names. For the default corpus this
+        should be None so that aliases align with settings.qdrant_*_collection.
+    new_collection_base:
+        Base name used for deriving the new physical collections that should
+        become the active pair after the swap.
+    """
+    summary_alias, content_alias = derive_alias_names(logical_base)
+    new_summary, new_content = derive_collection_names(new_collection_base)
+
+    actions = []
+    for alias_name, target in ((summary_alias, new_summary), (content_alias, new_content)):
+        alias_exists = False
+        try:
+            qdrant.get_collection(alias_name)
+            alias_exists = True
+        except Exception:
+            alias_exists = False
+        if alias_exists:
+            actions.append({"delete_alias": {"alias_name": alias_name}})
+        actions.append({"create_alias": {"collection_name": target, "alias_name": alias_name}})
+
+    if not actions:
+        return
+
+    base_url = settings.qdrant_url.rstrip("/")
+    url = f"{base_url}/collections/aliases"
+    payload = {"actions": actions}
+    data = json.dumps(payload).encode("utf-8")
+    req = _urlreq.Request(url, data=data, method="POST", headers=_qdrant_headers_json())
+    try:
+        with _urlreq.urlopen(req, timeout=settings.qdrant_request_timeout) as resp:
+            body = resp.read().decode("utf-8", "ignore")
+            try:
+                parsed = json.loads(body) if body.strip() else {}
+            except Exception:
+                parsed = {}
+            status = parsed.get("status") or parsed.get("result", {}).get("status")
+            if isinstance(status, str) and status.lower() not in {"ok", "acknowledged", "success"}:
+                logger.warning("Qdrant alias swap returned status=%s body=%s", status, body[:500])
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Nie udało się przełączyć aliasów kolekcji (base={logical_base}, new_base={new_collection_base}): {exc}",
+        ) from exc
 
 
 def import_collections_bundle(bundle: bytes, *, replace_existing: bool = True) -> Dict[str, Any]:

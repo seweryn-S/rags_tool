@@ -70,6 +70,7 @@ from app.qdrant_utils import (
     qdrant,
     sha1,
     find_path_by_content_sha256,
+    swap_collection_aliases,
 )
 from app.settings import get_settings
 from app.admin_routes import attach_admin_routes
@@ -1284,28 +1285,47 @@ def ingest_build(req: IngestBuildRequest):
     """Parse, summarize, embed and upsert corpus into Qdrant (full ingest)."""
     t0 = time.time()
     logger.debug(
-        "Starting ingest build | base_dir=%s glob=%s recursive=%s reindex=%s",
+        "Starting ingest build | base_dir=%s glob=%s recursive=%s reindex=%s collection_name=%s",
         req.base_dir,
         req.glob,
         req.recursive,
         req.reindex,
+        req.collection_name,
     )
-    summary_collection, content_collection = derive_collection_names(req.collection_name)
+
+    logical_base = req.collection_name
+    target_base = logical_base
+
+    # For the default corpus, aliases (settings.qdrant_*_collection) are derived
+    # from settings.collection_name with base=None. Keep this mapping so that
+    # alias swaps affect the names used by search/browse.
+    alias_base: Optional[str] = logical_base
+    if logical_base == settings.collection_name:
+        alias_base = None
 
     if req.reindex:
-        _clear_collection_cache(req.collection_name)
-        for coll_name in (summary_collection, content_collection):
-            try:
-                qdrant.delete_collection(collection_name=coll_name)
-                logger.debug(
-                    "Deleted collection '%s' due to reindex request", coll_name
-                )
-            except Exception as exc:
-                logger.debug(
-                    "Delete collection '%s' skipped or failed: %s", coll_name, exc
-                )
-    ensure_collections(req.collection_name)
-    _mark_collections_initialized(req.collection_name)
+        # Full rebuild: create a fresh pair of collections for a new base and
+        # populate them, then atomically repoint the aliases to this new pair.
+        import datetime as _dt
+
+        _clear_collection_cache(logical_base)
+        stamp = _dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+        target_base = f"{logical_base}_v{stamp}"
+        logger.info(
+            "Reindex requested; building into new versioned base '%s' (logical_base=%s)",
+            target_base,
+            logical_base,
+        )
+    else:
+        logger.info(
+            "Incremental ingest; using existing base '%s' (logical_base=%s)",
+            target_base,
+            logical_base,
+        )
+
+    # Ensure target collections (physical) exist; aliases are handled inside.
+    ensure_collections(target_base)
+    _mark_collections_initialized(target_base)
 
     base = pathlib.Path(req.base_dir)
     if not base.exists():
@@ -1331,7 +1351,7 @@ def ingest_build(req: IngestBuildRequest):
                 req.chunk_tokens,
                 req.chunk_overlap,
                 force_regen_summary=req.force_regen_summary,
-                collection_base=req.collection_name,
+                collection_base=logical_base,
                 dedupe_on_ingest=bool(settings.dedupe_on_ingest),
                 doc_url_map=doc_url_map,
                 stats=stats,
@@ -1371,8 +1391,27 @@ def ingest_build(req: IngestBuildRequest):
             content_vec,
             summary_vec,
             enable_sparse=req.enable_sparse,
-            collection_base=req.collection_name,
+            collection_base=target_base,
         )
+
+    if req.reindex:
+        # Atomically repoint aliases for this logical base so that the active
+        # pair (used by search/browse) now references the freshly built version.
+        try:
+            swap_collection_aliases(alias_base, target_base)
+            logger.info(
+                "Aliases repointed after reindex | logical_base=%s new_base=%s",
+                logical_base,
+                target_base,
+            )
+        except HTTPException:
+            # Bubble up HTTPException as-is so the caller sees clear status/diagnostic.
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Nie udało się przełączyć aliasów po reindex dla kolekcji '{logical_base}': {exc}",
+            ) from exc
 
     took_ms = int((time.time() - t0) * 1000)
     logger.debug(

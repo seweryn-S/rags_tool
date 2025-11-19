@@ -12,7 +12,7 @@ class SummRAGSettings(BaseSettings):
     """Centralised configuration for the rags_tool service."""
 
     app_name: str = "rags_tool"
-    app_version: str = "2.44.0"
+    app_version: str = "2.45.0"
 
     qdrant_url: str = Field(default="http://127.0.0.1:6333", alias="QDRANT_URL")
     qdrant_api_key: Optional[str] = Field(default=None, alias="QDRANT_API_KEY")
@@ -289,11 +289,13 @@ class SummRAGSettings(BaseSettings):
 
     @property
     def qdrant_summary_collection(self) -> str:
-        return self.summary_collection_name or f"{self.collection_name}_summaries"
+        base = self.summary_collection_name or f"{self.collection_name}_summaries"
+        return f"{base}_active"
 
     @property
     def qdrant_content_collection(self) -> str:
-        return self.content_collection_name or f"{self.collection_name}_content"
+        base = self.content_collection_name or f"{self.collection_name}_content"
+        return f"{base}_active"
 
     model_config = SettingsConfigDict(
         env_file=".env",

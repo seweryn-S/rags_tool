@@ -1,4 +1,8 @@
-# rags_tool (2.44.0)
+# rags_tool (2.45.0)
+
+## Nowości w 2.45.0
+- Qdrant: wprowadzono parę aliasów `*_summaries_active` / `*_content_active` dla głównego korpusu (i dodatkowych baz), dzięki czemu pełny reindex buduje nową wersję kolekcji w tle, a po zakończeniu aliasy są atomowo przełączane na nową parę (blue‑green). Stara para kolekcji pozostaje w Qdrant i może zostać skasowana ręcznie po weryfikacji.
+- Ingest: endpoint `POST /ingest/build` z `reindex=true` nie usuwa już aktywnej kolekcji na początku przebudowy. Zamiast tego tworzy nową bazę `COLLECTION_NAME_vYYYYMMDDhhmmss`, indeksuje do niej dane i dopiero na końcu przełącza aliasy, co eliminuje wielogodzinne okno „pustego” korpusu.
 
 ## Nowości w 2.44.0
 - Ingest: podczas wczytywania korpusu ładowana jest mapa linków WIKAMP z pliku `wikamp_normative_acts_map_doc.csv` znajdującego się w katalogu głównym korpusu. Linki są parowane po nazwie pliku (bez rozszerzenia) z priorytetem dla `.doc`/`.docx`, następnie `.pdf`, a na końcu pierwszego dostępnego wpisu.
