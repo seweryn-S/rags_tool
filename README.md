@@ -109,7 +109,7 @@ Przykład (POST /search/query):
   - Filtrowanie po `kinds` (np. `order`, `resolution`, `regulation`) wspierane w:
     - `POST /browse/doc-ids` (odpowiedź zawiera pole `doc_kind` i `candidates_total`).
   - Obsługiwane identyfikatory: `resolution`, `order`, `announcement`, `notice`, `decision`, `regulation`, `policy`, `procedure`, `instruction`, `statute`, `other`.
-- Admin UI: dodano operacje testowe dla browse (`browse-count`, `browse-doc-ids`).
+- Admin UI: dodano operacje dla browse (`browse-doc-ids`).
 
 Uwaga: filtrowanie `kinds` wykonywane jest post‑selekcyjnie (bez zmian w schemacie), więc nie wpływa na etap wyszukiwania po chunkach — zawęża wynik kandydatów i listę kandydatów.
 
@@ -138,65 +138,6 @@ Uwaga: filtrowanie `kinds` wykonywane jest post‑selekcyjnie (bez zmian w schem
     - `POST /browse/facets` — (usunięty w 2.43.0) proste rozkłady po kandydatach.
   - Wspólne helpery dostępu do magazynu przeniesione do `app/core/store_access.py`.
   - Bez zmian w istniejącym endpointzie `POST /search/query` — podział dotyczy struktury i nowych tras.
-
-## Nowości w 2.20.0
-- tools/golden_pipeline.sh: skrypt wykrywa istnienie pliku `golden_qa.jsonl` i pomija krok generacji golden setu. Aby wymusić ponowną generację, uruchom z przełącznikiem `--regenerate`.
-  - Przykład: `bash tools/golden_pipeline.sh --regenerate`
-  - Seed: domyślnie używany jest losowy seed. Aby uzyskać deterministyczną generację, ustaw zmienną `GOLDEN_SEED` (liczba całkowita), np. `GOLDEN_SEED=42 bash tools/golden_pipeline.sh`.
-
-## Nowości w 2.19.1
-- Poprawka: naprawiono błąd składni w promptcie endpointu `POST /golden/answer` (problem z ucieczką cudzysłowów). Serwis uruchamia się poprawnie.
-
-## Nowości w 2.19.0
-- Golden QA — „Nowa odpowiedź”: nowy przycisk przy każdej pozycji generuje odpowiedź na istniejące pytanie, używając treści dokumentu z metadanych. Pytanie pozostaje bez zmian; LLM zwraca krótką odpowiedź, która trafia do pola „expected_answer”. Endpoint: `POST /golden/answer`.
-- Golden QA — UI: komunikaty o stanie „Zapisano/Regeneracja/Zregenerowano/Błąd …” wyświetlane są lokalnie przy edytowanej pozycji (obok przycisków), a nie na górze strony.
-- Golden QA — UI: poprawka wyświetlania tytułu obok linku do pliku po regeneracji (fallback do symbolu, gdy tytuł jest zbyt krótki).
-
-## Nowości w 2.18.2
-- Golden QA — UI: komunikaty o stanie „Zapisano/Regeneracja/Zregenerowano/Błąd …” wyświetlane są lokalnie przy edytowanej pozycji (obok przycisków), a nie na górze strony.
-- Golden QA — UI: poprawka wyświetlania tytułu obok linku do pliku po regeneracji. Jeśli tytuł jest zbyt krótki (np. pojedynczy znak), UI pokazuje symbol dokumentu — eliminuje to przypadek pojedynczego „P”.
-
-## Nowości w 2.18.1
-- Golden QA — Regeneracja (UI): pole Seed nie ma domyślnej wartości; gdy pozostawisz je puste, UI nie wysyła `seed`, a backend wybiera dokument losowo (na bazie entropii systemowej). Aby uzyskać deterministyczny wybór, wpisz konkretny seed.
-- Dokumentacja: doprecyzowano kolejność wyboru puli dokumentów w „Zregeneruj”: preferowany jest skan `base_dir` + `glob` (+ `recursive`), a dopiero gdy brak wyników — fallback do `golden_documents.jsonl`.
-
-## Nowości w 2.18.0
-- Golden QA — pytania bez post‑procesingu: usunięto funkcję dopisującą kwalifikatory (np. lata) do pytań.
-  - Zarówno generacja, jak i „Zregeneruj” zapisują pytania dokładnie takie, jak zwróci LLM (prompt decyduje o formie).
-  - Brak modyfikacji typu „(w 2021 r.)” po stronie aplikacji.
-
-## Nowości w 2.17.0
-- Golden QA — Regeneracja:
-  - Losuje dokument z całej puli wskazanej przez `base_dir` + `glob` (+ `recursive`), deterministycznie gdy podasz `seed`.
-  - Jeśli wylosowany dokument nie występuje w `golden_documents.jsonl`, zostaje dopisany (z tytułem/symbolem/as_of).
-  - UI: mniejsze pola tekstowe, odświeżanie listy po regeneracji oraz działający link „[plik]” (przez `/golden/file?path=...`).
-
-## Nowości w 2.16.0
-- Golden QA: „Zregeneruj” tworzy teraz zupełnie nową parę Q/A na tej samej pozycji, domyślnie z losowo wybranego dokumentu z korpusu.
-  - UI wysyła `use_random_doc=true` oraz przekazuje `base_dir`, `glob`, `recursive` (jeśli dostępne). Jeśli istnieje `golden_documents.jsonl`, dokument losowany jest z niego; w przeciwnym razie skanowany jest korpus.
-  - Parametry różnorodności: `temperature` (domyślnie 0.7), `ensure_different=true` (unika duplikatów i tej samej pary co wcześniej).
-  - Meta rekordu (`doc_title`, `doc_path`, `doc_symbol`, `as_of`) jest aktualizowane do nowego dokumentu, `id` pozostaje bez zmian.
-
-## Nowości w 2.15.0
-- Golden QA: prosty interfejs WWW pod `/golden` do generowania i edycji bazy pytań/odpowiedzi używanej w testach.
-  - Formularz pozwala wskazać `base_dir`, `glob`, rekurencję, katalog wyjściowy oraz limity (`per_doc_qa`, `target_qa`, `limit_docs`, `seed`).
-  - Po uruchomieniu generowania w tle wykorzystuje istniejący generator z `tools/golden_make.py`.
-  - Wymaga skonfigurowanego LLM: preferowane `GOLDEN_LLM_BASE_URL`, `GOLDEN_LLM_API_KEY`, `GOLDEN_LLM_MODEL`. Jeśli brak tych zmiennych, używany jest fallback z ustawień `SUMMARY_API_URL`, `SUMMARY_API_KEY`, `SUMMARY_MODEL` (jeśli dostępne).
-  - Lista pozycji ładowana jest z `golden_qa.jsonl` (domyślnie `data/golden/golden_qa.jsonl`). Każdą parę można edytować i zapisać lub zregenerować pojedynczo (LLM).
-  - API pomocnicze (ukryte w OpenAPI): `POST /golden/generate`, `GET /golden/list`, `POST /golden/update`, `POST /golden/regenerate`, `POST /golden/answer`.
-
-Skrót uruchomienia:
-1) Otwórz `http://<host>:<port>/golden`.
-2) Ustaw ścieżkę `base_dir` do korpusu, opcjonalnie dostosuj parametry i kliknij „Uruchom generowanie”.
-3) Po wygenerowaniu przewiń w dół — pojawi się lista pozycji z możliwością edycji i regeneracji.
-
-Uwaga: generator golden QA korzysta z niezależnego LLM (OpenAI‑compatible). Skonfiguruj środowisko serwera:
-
-```bash
-export GOLDEN_LLM_BASE_URL=http://127.0.0.1:8001/v1
-export GOLDEN_LLM_API_KEY=sk-...
-export GOLDEN_LLM_MODEL=gpt-4o-mini
-```
 
 ## Nowości w 2.13.0
 - Ingest: deduplikacja identycznych plików po sumie kontrolnej SHA‑256 (bajtów pliku). Podczas budowania korpusu, jeżeli napotkany plik ma identyczną treść jak wcześniej przetworzony (w tym w poprzednich biegach), zostanie pominięty przed kosztowną obróbką (streszczenie/embedding). W logu INFO pojawi się komunikat:
@@ -274,30 +215,8 @@ PY
 - Ingest zapisuje przy każdym chunku metadane `section_path` (kanoniczna ścieżka), dzięki czemu wyszukiwanie rekonstruuje sekcje szybciej i bez zgadywania struktury etykiet.
 
 
-## Nowości w 2.1.0
-- Debug krok‑po‑kroku (`/search/debug/*`) ma teraz pełną zgodność parametrów z `/search/query`:
-  - przekazywane są `top_k`, `per_doc_limit`, `result_format`, `summary_mode`, `rep_alpha`, a także wszystkie wagi i tryby,
-  - mapa dokumentów z Etapu 1 jest przekazywana w całości (bez obcinania pól), co pozwala wiernie odtworzyć Etap 2,
-  - gdy globalnie pominięty jest Etap 1, do Etapu 2 przekazywany jest filtr trybu (`current`/`archival`) — zgodnie z zachowaniem `/search/query`.
-  Dzięki temu porównania wyników między debug a wyszukiwaniem są 1:1 (różnić się może jedynie skala score w wyniku fuzji RRF).
-
-## Nowości w 2.1.1
-- `/search/debug/embed` przyjmuje teraz również `result_format` i `summary_mode`, co pozwala uruchomić debug od 1. etapu z kompletem parametrów identycznych jak w `/search/query`.
-
 ## Nowości w 2.2.1
 - Poprawka: błąd inicjalizacji Admin UI (literówka `true` → `True` w specyfikacji operacji importu) uniemożliwiał start serwisu.
-
-## Nowości w 2.2.2
-- UI: usunięto z listy operacji stary debug single (1–4). Zostaje tylko debug (multi), który odwzorowuje `/search/query`. Endpointy single nie są rejestrowane.
-
-## Nowości w 2.2.3
-- Poprawka: brakujące pola (`top_k`, `per_doc_limit`, `result_format`, `summary_mode`) w modelu `DebugMultiStage1Request` powodowały błąd 500 w `POST /search/debug/stage1_multi`. Dodano pola dla pełnej zgodności parametrów.
-
-## Nowości w 2.2.4
-- Poprawka: `POST /search/debug/stage2_multi` — obsługa `content_sparse_queries` jako obiektów Pydantic lub słowników (błąd `SparseQuery` nie ma `get`). Ujednolicono dekodowanie i wzmocniono odporność na format wejścia.
-
-## Nowości w 2.2.5
-- Usunięto z kodu stary single‑debug (embed/stage1/stage2/shape) wraz z modelami — został tylko debug (multi), który odtwarza `/search/query` krok po kroku.
 
 ## Nowości w 2.3.0
 - Globalny rerank po fuzji (RRF) i twarde cięcie do K, gdy reranker jest włączony:
@@ -347,27 +266,6 @@ PY
   - Gdy `true`, endpoint `/search/query` pomija selekcję dokumentów po streszczeniach (Etap 1) i od razu wyszukuje w całej kolekcji chunków.
   - Zachowane są wszystkie pozostałe mechanizmy: hybryda dense/TF‑IDF, MMR, `per_doc_limit`, `summary_mode`, `result_format` oraz (jeśli skonfigurowany) reranker.
   - Uwaga dla UI/testów: w tym trybie `top_m` ogranicza początkową pulę chunków (zamiast liczby dokumentów po Etapie 1). Testy, które oczekują wywołania Etapu 1, powinny uwzględnić nowy tryb.
-
-## Nowości w 1.8.2
-
-- Admin UI: widoczny teraz jest „handler” (np. `app.api:search_debug_stage2`) dla każdej operacji.
-- Bogatszy opis etapów debugowania w panelu (wskazuje, które funkcje wewnętrzne są wywoływane).
-
-## Nowości w 1.8.1
-
-- Poprawka: `/search/debug/stage2` — brakujący parametr `top_m` w obiekcie konfiguracji powodował błąd 500. Dodano pole z domyślną wartością (100).
-
-## Nowości w 1.8.0
-
-- Tryb debugowania wyszukiwania krok po kroku (UI + API):
-  - Nowe endpointy (ukryte w OpenAPI, dostępne z panelu `/admin`):
-    - `POST /search/debug/embed` – embeduje pojedyncze zapytanie i buduje zapytania TF‑IDF (hybryda).
-    - `POST /search/debug/stage1` – selekcja dokumentów na streszczeniach (MMR, hybryda).
-    - `POST /search/debug/stage2` – selekcja chunków w obrębie wybranych dokumentów (MMR, hybryda).
-    - `POST /search/debug/shape` – kształtowanie odpowiedzi (`flat|grouped|blocks`).
-  - Panel Admin UI: po wykonaniu etapu pojawia się przycisk „→ Następny etap”, który
-    automatycznie przełącza operację i wstawia przygotowane body na podstawie poprzedniej odpowiedzi.
-  - Proste, JSON‑owe formaty — wyniki etapów zawierają minimalne pola do inspekcji i kontynuacji.
 
 ## Nowości w 1.7.1
 
@@ -857,16 +755,7 @@ MIT
 - Dokumentacja narzędzia: dodano opis dwóch intencji dla `/search/query` (evidence i doc_list), heurystyki wykrywania (słowa kluczowe) oraz preset „DocList” z zalecanymi parametrami. Zaktualizowano opis w OpenAPI (widoczny dla narzędzia LLM). Bez zmian w API.
 ## Nowości w 1.9.1
 
-- Refaktor: wydzielono kod Admin UI i endpointy debug (`/admin`, `/search/debug/*`) do oddzielnego modułu `app/admin_routes.py` i podpinane są przez `attach_admin_routes(app)`. Kod funkcjonalny pozostaje w `app/api.py`.
-## Nowości w 2.2.0
-- Nowy tryb debugowania dla wielu zapytań, wiernie odzwierciedlający `/search/query` krok po kroku:
-  - `POST /search/debug/embed_multi` – embeduje wszystkie zapytania i buduje zapytania TF‑IDF per‑query.
-  - `POST /search/debug/stage1_multi` – selekcja dokumentów dla każdego zapytania (Etap 1).
-  - `POST /search/debug/stage2_multi` – selekcja chunków per‑query (Etap 2) z takim samym oversamplingiem i fuzją RRF (1/(60+rank)) jak w `/search/query`.
-  - `POST /search/debug/shape_multi` – kształtowanie wyników po fuzji (flat/grouped/blocks).
-  Debug multi‑query przyjmuje ten sam zestaw parametrów co `/search/query` już od pierwszego kroku i przenosi je między etapami bez obcinania.
--## Nowości w 2.2.1
-- Poprawka: błąd inicjalizacji Admin UI (literówka `true` → `True` w specyfikacji operacji importu) uniemożliwiał start serwisu.
+- Refaktor: wydzielono kod panelu `/admin` do oddzielnego modułu `app/admin_routes.py` i podpinany jest przez `attach_admin_routes(app)`. Kod funkcjonalny pozostaje w `app/api.py`.
 ## Nowości w 2.8.0
 - Streszczenia zawierają teraz pole `doc_date` (data wprowadzenia/ogłoszenia dokumentu). Pole jest:
   - wydobywane przez model (prompt uzupełniony o instrukcję),

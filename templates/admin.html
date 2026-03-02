@@ -32,7 +32,7 @@
 <body>
     <div class="container">
         <h1>rags_tool Admin Console</h1>
-        <p class="note">Operacje wysyłają nagłówek <code>X-Admin-UI: 1</code>, aby wymusić tryb debug na serwerze.</p>
+        <p class="note">Panel sluzy do wykonywania operacji administracyjnych i serwisowych dostepnych w API.</p>
         <label for="operation">Wybierz operację</label>
         <select id="operation"></select>
         <div class="meta">
@@ -60,7 +60,6 @@
             </label>
         </div>
         <button id="send">Wyślij żądanie</button>
-        <button id="next-step" style="display:none; background:#10b981;">→ Następny etap</button>
         <pre id="result">Odpowiedź pojawi się tutaj.</pre>
     </div>
     <script>
@@ -74,7 +73,6 @@
         const payloadEl = document.getElementById("payload");
         const resultEl = document.getElementById("result");
         const sendBtn = document.getElementById("send");
-        const nextBtn = document.getElementById("next-step");
         const fileWrapper = document.getElementById("file-wrapper");
         const fileInput = document.getElementById("file-input");
         const replaceCheckbox = document.getElementById("replace-existing");
@@ -100,8 +98,6 @@
             }
             return fallback;
         }
-
-        let lastJson = null;
 
         function populateOptions() {
             operations.forEach((op, idx) => {
@@ -179,9 +175,7 @@
 
             let requestBody = undefined;
             let useFilePayload = op.accepts_file === true && fileInput && fileInput.files.length === 1;
-            const headers = {
-                "X-Admin-UI": "1"
-            };
+            const headers = {};
 
             if (op.method !== "GET") {
                 if (useFilePayload) {
@@ -218,7 +212,6 @@
                 let downloaded = false;
                 if (ct.includes("application/json")) {
                     const data = await response.json();
-                    lastJson = data;
                     resultEl.textContent = JSON.stringify(data, null, 2);
                 } else if (ct.includes("application/gzip") || ct.includes("application/octet-stream") || disposition.toLowerCase().includes("attachment")) {
                     const buffer = await response.arrayBuffer();
@@ -248,22 +241,6 @@
                 resultEl.textContent = `Błąd wywołania: ${err}`;
             }
 
-            // Pokaż przycisk następnego etapu, jeśli odpowiedź zawiera _next
-            try {
-                const nx = (lastJson && lastJson._next) ? lastJson._next : null;
-                if (nx && nx.operation_id && nx.payload) {
-                    nextBtn.style.display = '';
-                    nextBtn.dataset.operationId = nx.operation_id;
-                    nextBtn.dataset.payload = JSON.stringify(nx.payload, null, 2);
-                } else {
-                    nextBtn.style.display = 'none';
-                    nextBtn.dataset.operationId = '';
-                    nextBtn.dataset.payload = '';
-                }
-            } catch (_) {
-                nextBtn.style.display = 'none';
-            }
-
             sendBtn.disabled = false;
         }
 
@@ -271,20 +248,6 @@
         renderOperation(selectEl.value);
         selectEl.addEventListener("change", event => renderOperation(event.target.value));
         sendBtn.addEventListener("click", runRequest);
-        nextBtn.addEventListener("click", () => {
-            const opId = nextBtn.dataset.operationId;
-            const payload = nextBtn.dataset.payload || '';
-            if (!opId || !payload) return;
-            selectEl.value = opId;
-            renderOperation(opId);
-            try {
-                payloadEl.value = JSON.stringify(JSON.parse(payload), null, 2);
-            } catch (_) {
-                payloadEl.value = payload;
-            }
-            // schowaj przycisk do czasu kolejnej odpowiedzi
-            nextBtn.style.display = 'none';
-        });
     </script>
 </body>
 </html>

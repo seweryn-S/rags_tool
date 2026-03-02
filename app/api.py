@@ -71,7 +71,6 @@ from app.qdrant_utils import (
 )
 from app.settings import get_settings
 from app.admin_routes import attach_admin_routes
-from app.golden_routes import attach_golden_routes
 from app.core.summary_cache import (
     compute_file_sha256,
     load_sidecar,
@@ -96,24 +95,6 @@ logger.propagate = False
 
 _collection_init_lock = Lock()
 _initialized_collections: Set[str] = set()
-
-# Przygotuj czytelny JSON body dla operacji ingest-build bez ryzykownego łączenia stringów
-INGEST_BUILD_BODY = json.dumps(
-    {
-        "base_dir": "/app/data",
-        "glob": "**/*",
-        "recursive": True,
-        "reindex": False,
-        "chunk_tokens": settings.chunk_tokens,
-        "chunk_overlap": settings.chunk_overlap,
-        "collection_name": "rags_tool",
-        "enable_sparse": True,
-        "rebuild_tfidf": True,
-        "force_regen_summary": False,
-    },
-    ensure_ascii=False,
-    indent=2,
-)
 
 
 # Build a stable cache key for (summary, content) collections derived from base.
@@ -516,71 +497,10 @@ def _iter_summary_texts(path: pathlib.Path) -> Iterable[str]:
             yield summary
 
 
-ADMIN_OPERATION_SPECS: List[Dict[str, Any]] = [
-    {"id": "search-debug-embed", "path": "/search/debug/embed", "method": "POST", "label": "Search Debug: 1) embed", "body": "{\"query\":\"Jak działa rags_tool?\",\"mode\":\"auto\",\"use_hybrid\":true}"},
-    {"id": "search-debug-stage1", "path": "/search/debug/stage1", "method": "POST", "label": "Search Debug: 2) stage1", "body": "{\"q_text\":\"Jak działa rags_tool?\",\"q_vec\":[0.0],\"mode\":\"auto\",\"use_hybrid\":true,\"top_m\":100,\"score_norm\":\"minmax\",\"dense_weight\":0.6,\"sparse_weight\":0.4,\"mmr_stage1\":true,\"mmr_lambda\":0.3}"},
-    {"id": "search-debug-stage2", "path": "/search/debug/stage2", "method": "POST", "label": "Search Debug: 3) stage2", "body": "{\"q_text\":\"Jak działa rags_tool?\",\"q_vec\":[0.0],\"cand_doc_ids\":[\"<doc_id>\"],\"doc_map\":{},\"top_k\":10,\"per_doc_limit\":2,\"score_norm\":\"minmax\",\"dense_weight\":0.6,\"sparse_weight\":0.4,\"mmr_lambda\":0.3}"},
-    {"id": "search-debug-shape", "path": "/search/debug/shape", "method": "POST", "label": "Search Debug: 4) shape", "body": "{\"final_hits\":[{\"doc_id\":\"<doc_id>\",\"path\":\"/abs/path\",\"section\":null,\"chunk_id\":0,\"score\":0.5,\"snippet\":\"...\"}],\"result_format\":\"blocks\",\"summary_mode\":\"first\"}"},
-    {"id": "about", "path": "/about", "method": "GET"},
-    {"id": "health", "path": "/health", "method": "GET"},
-    {
-        "id": "collections-init",
-        "path": "/collections/init",
-        "method": "POST",
-        "body": "{\n  \"collection_name\": \"rags_tool\",\n  \"force_dim_probe\": false\n}",
-    },
-    {
-        "id": "collections-export",
-        "path": "/collections/export",
-        "method": "POST",
-        "label": "Eksport kolekcji (plik .tar.gz)",
-        "body": "{}",
-    },
-    {
-        "id": "collections-import",
-        "path": "/collections/import",
-        "method": "POST",
-        "label": "Import kolekcji z archiwum",
-        "body": "{\n  \"archive_base64\": \"<wklej_archiwum_base64>\",\n  \"replace_existing\": true\n}",
-        "accepts_file": True,
-    },
-    {
-        "id": "ingest-scan",
-        "path": "/ingest/scan",
-        "method": "POST",
-        "body": "{\n  \"base_dir\": \"/app/data\",\n  \"glob\": \"**/*\",\n  \"recursive\": true\n}",
-    },
-    {
-        "id": "summaries-generate",
-        "path": "/summaries/generate",
-        "method": "POST",
-        "body": "{\n  \"files\": [\n    \"/app/data/example.md\"\n  ]\n}",
-    },
-    {
-        "id": "ingest-build",
-        "path": "/ingest/build",
-        "method": "POST",
-        "body": INGEST_BUILD_BODY,
-    },
-    {
-        "id": "search-query",
-        "path": "/search/query",
-        "method": "POST",
-        "body": "{\n  \"query\": [\n    \"Jak działa rags_tool?\",\n    \"architektura rags_tool\"\n  ],\n  \"top_m\": 10,\n  \"top_k\": 5,\n  \"mode\": \"auto\",\n  \"use_hybrid\": true,\n  \"dense_weight\": 0.6,\n  \"sparse_weight\": 0.4,\n  \"mmr_lambda\": 0.3,\n  \"per_doc_limit\": 2,\n  \"score_norm\": \"minmax\",\n  \"rep_alpha\": 0.6,\n  \"mmr_stage1\": true,\n  \"summary_mode\": \"first\",\n  \"result_format\": \"blocks\"\n}",
-    },
-    {
-        "id": "search-query-restricted",
-        "path": "/search/query",
-        "method": "POST",
-        "body": "{\n  \"query\": [\n    \"cytaty dla skrótu\"\n  ],\n  \"top_m\": 1200,\n  \"top_k\": 100,\n  \"mode\": \"auto\",\n  \"use_hybrid\": true,\n  \"per_doc_limit\": 50,\n  \"result_format\": \"blocks\",\n  \"restrict_doc_ids\": [\n    \"<doc_id_1>\",\n    \"<doc_id_2>\"\n  ]\n}",
-    },
-]
-
 app = FastAPI(title=f"{settings.app_name} OpenAPI Tool", version=settings.app_version)
 
-# Attach Admin UI and debug endpoints from isolated module
+# Attach Admin UI routes from isolated module
 attach_admin_routes(app)
-attach_golden_routes(app)
 
 
 # Ensure Qdrant collections and indexes at process startup
@@ -628,7 +548,7 @@ def _startup_ensure_collections() -> None:
         logger.warning("Startup ensure_collections failed: %s", exc)
 
 
-# Admin UI and step-by-step debug endpoints are defined in app/admin_routes.py
+# Admin UI routes are defined in app/admin_routes.py
 
 
 @app.get(
