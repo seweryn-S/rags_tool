@@ -134,50 +134,6 @@ class SummRAGSettings(BaseSettings):
         alias="SEARCH_TOOL_DESCRIPTION",
     )
 
-    # --- Contradictions analysis (on-the-fly) ---
-    contradictions_tool_description: str = Field(
-        default=(
-            "Analiza sprzeczności w korpusie. UŻYWAJ TYLKO, gdy użytkownik wprost prosi o "
-            "wykrycie sprzeczności/niespójności dla wskazanego tytułu dokumentu. Wywołuj "
-            "POST /analysis/contradictions z JSON: {\n  \"title\": \"Tytuł dokumentu\"\n}. "
-            "Domyślnie porównuje wyłącznie dokumenty obowiązujące (is_active=true) i raportuje sekcjami na poziomie 'ust'. "
-            "Nie używaj do zwykłego wyszukiwania — do tego służy /search/query."
-        ),
-        alias="CONTRADICTIONS_TOOL_DESCRIPTION",
-    )
-    contradictions_rule_prompt_json: str = Field(
-        default=(
-            "Zwróć wyłącznie JSON (bez bloków kodu, bez backticks, bez komentarzy). "
-            "Wyodrębnij z dostarczonego fragmentu: "
-            "- 'rule' (string; 1–2 zdania po polsku; bez cytowania, bez referencji), "
-            "- 'subject' (string; tytuł/oznaczenie aktu lub 'this' jeśli mowa o niniejszym akcie), "
-            "- 'rule_type' (string; jedno z: entry_into_force, repeal, deadline, threshold, scope, other). "
-            "Wskazówki: Jeśli fragment dotyczy wejścia w życie (np. 'wchodzi w życie', 'z dniem ...'), przypisz 'entry_into_force'. "
-            "ODPOWIADAJ WYŁĄCZNIE PO POLSKU."
-        ),
-        alias="CONTRADICTIONS_RULE_PROMPT_JSON",
-    )
-    contradictions_judge_prompt_json: str = Field(
-        default=(
-            "Zwróć wyłącznie JSON (bez bloków kodu, bez backticks, bez komentarzy). Oceniasz relację między dwoma fragmentami tekstu prawniczego/organizacyjnego. "
-            "Użyj etykiet: 'contradiction' (A i B nie mogą być jednocześnie prawdziwe lub nakazują "
-            "sprzeczne działania), 'change' (nowszy akt zmienia/uchyla/odwołuje wcześniejszy — to nie jest sprzeczność), "
-            "'entails' (B wynika z A lub A z B), 'overlap' (częściowy związek), 'unrelated' (brak związku). "
-            "Wejście ma strukturę: {rule_a, subject_a, title_a, doc_id_a, doc_date_a, context_a, subject_b, title_b, doc_id_b, doc_date_b, context_b, rule_type}. "
-            "Zasady: Dwa różne akty mogą wchodzić w życie w różnych terminach — to NIE jest sprzeczność; sprzeczność rozważaj tylko, jeśli A i B dotyczą tego samego aktu (same_subject=true). "
-            "Jeśli B jest nowszy (doc_date_b > doc_date_a) i zmienia/uchyla/odwołuje treść A, wybierz 'change', nie 'contradiction'. "
-            "ODPOWIADAJ WYŁĄCZNIE PO POLSKU. "
-            "Zwróć: 'label' (string), 'confidence' (0..1), 'rationale' (krótkie uzasadnienie po polsku, max 2 zdania), "
-            "'quotes_a' (lista krótkich cytatów z A), 'quotes_b' (lista krótkich cytatów z B), "
-            "'subject_extracted_a' (string), 'subject_extracted_b' (string), 'same_subject' (bool). Cytuj tylko z dostarczonych kontekstów."
-        ),
-        alias="CONTRADICTIONS_JUDGE_PROMPT_JSON",
-    )
-    contradictions_max_context_chars: int = Field(
-        default=2500,
-        alias="CONTRADICTIONS_MAX_CONTEXT_CHARS",
-    )
-
     # Globalny przełącznik: pomiń Etap 1 (streszczenia) i szukaj od razu w całym korpusie (chunkach).
     # Sterowany wyłącznie przez admina z .env (brak parametru w API).
     search_skip_stage1_default: bool = Field(

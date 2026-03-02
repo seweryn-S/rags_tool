@@ -2,8 +2,8 @@
 
 This module exposes reusable functions for reading document metadata and
 section/chunk contents from Qdrant. It is intentionally free of retrieval
-scoring, MMR, or shaping concerns, so other components (e.g. contradictions
-analysis, browse/analytics) can import it without pulling in search internals.
+scoring, MMR, or shaping concerns, so other components can import it without
+pulling in search internals.
 """
 
 from __future__ import annotations

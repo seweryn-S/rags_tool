@@ -317,95 +317,10 @@ class SparseQuery(BaseModel):
     values: List[float]
 
 
-# --- Contradictions analysis models ---
+# --- Browse/analytics models ---
 
-class ContradictionAnalysisRequest(BaseModel):
-    title: str = Field(..., description="Tytuł dokumentu referencyjnego (lub jego charakterystyczny nagłówek)")
-    doc_id: Optional[str] = Field(
-        default=None,
-        description="Opcjonalnie znane doc_id dokumentu referencyjnego (przyspiesza identyfikację)",
-    )
-    mode: str = Field(
-        default="current",
-        description=(
-            "Zakres przeszukiwania: current|archival|all. 'current' filtruje is_active=true; 'archival' false; 'all' bez filtra."
-        ),
-    )
-    section_level: str = Field(
-        default="ust",
-        description=(
-            "Poziom sekcji do raportowania i grupowania. Rekomendowane 'ust'. Dozwolone: chapter|par|ust|pkt|lit."
-        ),
-    )
-    max_candidates_per_section: int = Field(
-        default=6,
-        ge=1,
-        le=20,
-        description="Maksymalna liczba kandydatów (sekcji z innych dokumentów) rozpatrywanych na sekcję",
-    )
-    include_archival_conflicts: bool = Field(
-        default=False,
-        description="Czy raportować konflikty z dokumentami archiwalnymi (is_active=false) jako informacyjne",
-    )
-    confidence_threshold: float = Field(
-        default=0.6,
-        ge=0.0,
-        le=1.0,
-        description="Minimalny próg pewności LLM dla ujęcia w raporcie",
-    )
-
-
-class ContradictionFinding(BaseModel):
-    other_doc_id: str
-    other_title: Optional[str] = None
-    other_path: Optional[str] = None
-    other_doc_date: Optional[str] = None
-    other_is_active: Optional[bool] = None
-    other_section: Optional[str] = None
-    label: str
-    confidence: float
-    rationale: Optional[str] = None
-    quotes_a: Optional[List[str]] = None
-    quotes_b: Optional[List[str]] = None
-    # Audit fields
-    subject_a: Optional[str] = Field(default=None, description="Zidentyfikowany podmiot reguły po stronie A (sekcja referencyjna)")
-    subject_b: Optional[str] = Field(default=None, description="Zidentyfikowany podmiot reguły po stronie B (sekcja kandydująca)")
-    same_subject: Optional[bool] = Field(default=None, description="Czy A i B dotyczą tego samego aktu/podmiotu")
-    rule_type: Optional[str] = Field(default=None, description="Klasyfikacja reguły (np. entry_into_force, deadline, scope, threshold, repeal, other)")
-
-
-class ContradictionSectionReport(BaseModel):
-    section: Optional[str]
-    rule: Optional[str] = Field(default=None, description="Zredukowana reguła/teza wyekstrahowana z sekcji A")
-    rule_subject: Optional[str] = Field(default=None, description="Podmiot/akt, którego dotyczy reguła sekcji A (zidentyfikowany)")
-    rule_type: Optional[str] = Field(default=None, description="Klasyfikacja reguły sekcji A")
-    conflicts: List[ContradictionFinding]
-
-
-class ContradictionAnalysisResponse(BaseModel):
-    doc_id: str
-    title: Optional[str] = None
-    doc_date: Optional[str] = None
-    is_active: Optional[bool] = None
-    findings: List[ContradictionSectionReport]
-    took_ms: int = Field(..., description="Całkowity czas wykonania analizy (ms)")
-    # Lista dokumentów, które zostały realnie przetworzone (dla audytu)
-    class ProcessedDoc(BaseModel):
-        doc_id: str
-        title: Optional[str] = None
-        doc_date: Optional[str] = None
-        is_active: Optional[bool] = None
-
-    processed_docs: List[ProcessedDoc] = Field(
-        default_factory=list,
-        description="Lista dokumentów uwzględnionych w analizie (zawsze zawiera dokument referencyjny)",
-    )
-
-
-# --- Documents listing (for external tools) ---
-
-class DocListItem(BaseModel):
-    """Lightweight document metadata used by tools to enumerate corpus."""
+class BrowseDocItem(BaseModel):
+    """Lightweight document metadata returned by browse endpoints."""
 
     doc_id: str = Field(..., description="Stable document identifier (sha1 over absolute path).")
     title: Optional[str] = Field(default=None, description="Document title extracted during ingest.")
@@ -414,14 +329,6 @@ class DocListItem(BaseModel):
     doc_kind: Optional[str] = Field(default=None, description="Coarse document kind inferred from title/signature (e.g., order, resolution, regulation).")
     doc_url: Optional[str] = Field(default=None, description="External source URL for the document (e.g., WIKAMP post).")
 
-
-class DocsListResponse(BaseModel):
-    """Response envelope for documents list endpoint."""
-
-    docs: List[DocListItem]
-
-
-# --- Browse/analytics models ---
 
 class BrowseQuery(BaseModel):
     """Lightweight browse request over Stage-1 candidates."""
@@ -492,7 +399,7 @@ class BrowseIdsResponse(BaseModel):
     total: int
     approx: bool = False
     candidates_total: Optional[int] = None
-    docs: List[DocListItem]
+    docs: List[BrowseDocItem]
 
 
 """Facets models removed in 2.43.0. Use /browse/doc-ids and aggregate client-side."""
