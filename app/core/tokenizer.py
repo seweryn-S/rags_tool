@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Sequence
+import warnings
 
 
 class TokenizerError(RuntimeError):
@@ -64,7 +65,10 @@ def _build_hf_adapter(spec: str) -> TokenizerAdapter:
         raise TokenizerError("Tokenizer spec 'hf:' must include a model name, e.g. 'hf:bert-base-uncased'.")
 
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model_name)  # pragma: no cover - runtime path
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+        )  # pragma: no cover - runtime path
     except Exception as exc:  # pragma: no cover - defensive
         raise TokenizerError(f"Failed to load Hugging Face tokenizer '{model_name}'.") from exc
 
@@ -101,7 +105,18 @@ def load_tokenizer(spec: str | None) -> TokenizerAdapter:
     if lowered.startswith("tiktoken:"):
         return _build_tiktoken_adapter(normalized)
     if lowered.startswith("hf:") or lowered.startswith("huggingface:"):
-        return _build_hf_adapter(normalized)
+        try:
+            return _build_hf_adapter(normalized)
+        except TokenizerError as exc:
+            warnings.warn(
+                (
+                    f"{exc} Falling back to tiktoken:cl100k_base for local chunking. "
+                    "Remote embedding calls still use the configured embedding model."
+                ),
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return _build_tiktoken_adapter("tiktoken:cl100k_base")
 
     raise TokenizerError(
         "Unsupported tokenizer spec. Use 'tiktoken:<encoding>' or 'hf:<model_name>'."

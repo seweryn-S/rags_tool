@@ -194,6 +194,189 @@ def derive_alias_names(base: Optional[str] = None) -> Tuple[str, str]:
     return f"{summary_collection}_active", f"{content_collection}_active"
 
 
+def _collection_names_from_response(listed: Any) -> Set[str]:
+    """Extract collection names from mixed qdrant-client response shapes."""
+    if isinstance(listed, dict):
+        result = listed.get("result", listed)
+        entries = result.get("collections", []) if isinstance(result, dict) else []
+        return {
+            str(item.get("name"))
+            for item in entries
+            if isinstance(item, dict) and item.get("name")
+        }
+    return {
+        str(item.name)
+        for item in getattr(listed, "collections", []) or []
+        if getattr(item, "name", None)
+    }
+
+
+def _extract_alias_entries(raw: Any) -> List[Any]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        result = raw.get("result", raw)
+        if isinstance(result, dict):
+            entries = result.get("aliases") or []
+            return list(entries) if isinstance(entries, list) else []
+        return []
+
+    result = getattr(raw, "result", None)
+    if result is not None:
+        return _extract_alias_entries(result)
+
+    entries = getattr(raw, "aliases", None)
+    if entries is None:
+        return []
+    try:
+        return list(entries)
+    except TypeError:
+        return []
+
+
+def _alias_name_from_entry(entry: Any) -> Optional[str]:
+    if isinstance(entry, dict):
+        value = entry.get("alias_name") or entry.get("alias")
+    else:
+        value = getattr(entry, "alias_name", None) or getattr(entry, "alias", None)
+    return str(value) if value else None
+
+
+def _alias_collection_from_entry(entry: Any) -> Optional[str]:
+    if isinstance(entry, dict):
+        value = entry.get("collection_name") or entry.get("collection")
+    else:
+        value = getattr(entry, "collection_name", None) or getattr(entry, "collection", None)
+    return str(value) if value else None
+
+
+def _parse_alias_targets(raw: Any) -> Dict[str, str]:
+    targets: Dict[str, str] = {}
+    for entry in _extract_alias_entries(raw):
+        alias_name = _alias_name_from_entry(entry)
+        collection_name = _alias_collection_from_entry(entry)
+        if alias_name and collection_name:
+            targets[alias_name] = collection_name
+    return targets
+
+
+def _get_qdrant_alias_targets() -> Dict[str, str]:
+    """Return Qdrant alias -> collection mappings using client or REST."""
+    method = getattr(qdrant, "get_aliases", None)
+    if method is not None:
+        try:
+            return _parse_alias_targets(method())
+        except Exception as exc:
+            logger.debug("Client get aliases failed, fallback to REST: %s", exc)
+
+    base = settings.qdrant_url.rstrip("/")
+    req = _urlreq.Request(f"{base}/aliases", method="GET", headers=_qdrant_headers_json())
+    try:
+        with _urlreq.urlopen(req, timeout=settings.qdrant_request_timeout) as resp:
+            body = resp.read().decode("utf-8", "ignore")
+        return _parse_alias_targets(json.loads(body) if body.strip() else {})
+    except Exception as exc:
+        logger.debug("REST get aliases failed: %s", exc)
+        return {}
+
+
+def _ensure_collection_available(
+    collection_name: Optional[str],
+    *,
+    role: str,
+    available_names: Optional[Set[str]],
+) -> str:
+    if not collection_name:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Brak aktywnej kolekcji projektu dla roli '{role}'",
+        )
+    if available_names is not None and collection_name not in available_names:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Aktywna kolekcja projektu '{collection_name}' dla roli '{role}' nie istnieje w Qdrant",
+        )
+    if available_names is None and not _collection_exists(collection_name):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Aktywna kolekcja projektu '{collection_name}' dla roli '{role}' nie istnieje w Qdrant",
+        )
+    return collection_name
+
+
+def _collection_points_count(collection_name: str) -> Optional[int]:
+    try:
+        info = qdrant.get_collection(collection_name)
+        value = getattr(info, "points_count", None)
+        return int(value) if value is not None else None
+    except Exception as exc:
+        logger.debug(
+            "Client get_collection failed for '%s', trying raw REST for point count: %s",
+            collection_name,
+            exc,
+        )
+
+    base = settings.qdrant_url.rstrip("/")
+    url = f"{base}/collections/{_urlparse.quote(collection_name)}"
+    req = _urlreq.Request(url, method="GET", headers=_qdrant_headers_json())
+    try:
+        with _urlreq.urlopen(req, timeout=settings.qdrant_request_timeout) as resp:
+            body = resp.read().decode("utf-8", "ignore")
+        parsed = json.loads(body) if body.strip() else {}
+        result = parsed.get("result") if isinstance(parsed, dict) else {}
+        value = result.get("points_count") if isinstance(result, dict) else None
+        return int(value) if value is not None else None
+    except Exception as exc:
+        logger.debug("Raw REST get collection failed for '%s': %s", collection_name, exc)
+        return None
+
+
+def resolve_active_project_collections(
+    available_names: Optional[Set[str]] = None,
+) -> List[Dict[str, str]]:
+    """Resolve active summary/content collections for the configured project."""
+    summary_alias, content_alias = derive_alias_names(None)
+    summary_base, content_base = derive_collection_names(None)
+    aliases = _get_qdrant_alias_targets()
+
+    summary_target = aliases.get(summary_alias)
+    content_target = aliases.get(content_alias)
+
+    if not summary_target and (
+        available_names is None and _collection_exists(summary_base)
+        or available_names is not None and summary_base in available_names
+    ):
+        summary_target = summary_base
+    if not content_target and (
+        available_names is None and _collection_exists(content_base)
+        or available_names is not None and content_base in available_names
+    ):
+        content_target = content_base
+
+    return [
+        {
+            "role": "summary",
+            "alias": summary_alias,
+            "name": _ensure_collection_available(
+                summary_target,
+                role="summary",
+                available_names=available_names,
+            ),
+        },
+        {
+            "role": "content",
+            "alias": content_alias,
+            "name": _ensure_collection_available(
+                content_target,
+                role="content",
+                available_names=available_names,
+            ),
+        },
+    ]
+
+
 DEFAULT_PAYLOAD_INDEXES: Tuple[Tuple[str, Dict[str, Any]], ...] = (
     ("doc_id", {"type": "keyword"}),
     ("point_type", {"type": "keyword"}),
@@ -404,13 +587,10 @@ def ensure_collections(collection_base: Optional[str] = None, dim: Optional[int]
     # Aliases are used as stable public names (e.g., *_active) that can be
     # atomically repointed to new physical collections during full rebuilds.
     summary_alias, content_alias = derive_alias_names(collection_base)
+    existing_aliases = _get_qdrant_alias_targets()
     for alias_name, target in ((summary_alias, summary_collection), (content_alias, content_collection)):
-        try:
-            # Treat a successful get_collection as "alias or collection exists"
-            qdrant.get_collection(alias_name)
+        if existing_aliases.get(alias_name):
             continue
-        except Exception:
-            pass
         try:
             base_url = settings.qdrant_url.rstrip("/")
             url = f"{base_url}/collections/aliases"
@@ -438,30 +618,39 @@ def ensure_collections(collection_base: Optional[str] = None, dim: Optional[int]
             )
 
 
-# Export all collections and local TF‑IDF artifacts as a tar.gz archive.
+# Export active project collections and local TF‑IDF artifacts as a tar.gz archive.
 def export_collections_bundle(collection_names: Optional[Iterable[str]] = None) -> Tuple[bytes, Dict[str, Any]]:
-    """Serialize all Qdrant collections and local TF-IDF indices into a tar.gz bundle."""
+    """Serialize active project Qdrant collections and local TF-IDF indices."""
 
     try:
         listed = qdrant.get_collections()
     except Exception as exc:  # pragma: no cover - network dependency
         raise HTTPException(status_code=502, detail=f"Nie udało się pobrać listy kolekcji: {exc}") from exc
 
-    available = sorted({item.name for item in getattr(listed, "collections", []) or []})
+    available_names = _collection_names_from_response(listed)
     if collection_names:
-        requested = sorted({name for name in collection_names if name})
-        missing = sorted(set(requested) - set(available))
-        if missing:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Brak kolekcji: {', '.join(missing)}",
-            )
+        logger.info(
+            "Parametr collection_names=%s jest przestarzały i został zignorowany; eksport obejmuje aktywne kolekcje projektu '%s'.",
+            list(collection_names),
+            settings.collection_name,
+        )
+
+    active_collections = resolve_active_project_collections(available_names=available_names)
+    collection_roles = {entry["name"]: entry for entry in active_collections}
+    selected_names = [entry["name"] for entry in active_collections]
+    alias_map = {entry["alias"]: entry["name"] for entry in active_collections}
 
     bundle_buffer = io.BytesIO()
     metadata: Dict[str, Any] = {
         "meta": {
             "generated_at": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
             "app_version": settings.app_version,
+        },
+        "project": {
+            "collection_name": settings.collection_name,
+            "summary_alias": active_collections[0]["alias"],
+            "content_alias": active_collections[1]["alias"],
+            "aliases": alias_map,
         },
         "collections": [],
     }
@@ -476,13 +665,9 @@ def export_collections_bundle(collection_names: Optional[Iterable[str]] = None) 
     with tempfile.TemporaryDirectory(prefix="qdrant-export-") as scratch_dir:
         scratch_path = pathlib.Path(scratch_dir)
         with tarfile.open(fileobj=bundle_buffer, mode="w:gz") as tar:
-            for name in available:
+            for name in selected_names:
                 logger.debug("Eksport kolekcji '%s'", name)
-                try:
-                    info = qdrant.get_collection(name)
-                except Exception as exc:  # pragma: no cover - remote failure
-                    logger.error("Nie udało się pobrać konfiguracji '%s': %s", name, exc)
-                    raise HTTPException(status_code=502, detail=f"Nie udało się pobrać konfiguracji kolekcji '{name}': {exc}") from exc
+                points_count = _collection_points_count(name)
 
                 snapshot = _create_collection_snapshot(name)
                 snapshot_name = _extract_snapshot_name(snapshot)
@@ -505,8 +690,10 @@ def export_collections_bundle(collection_names: Optional[Iterable[str]] = None) 
 
                 metadata_entry = {
                     "name": name,
+                    "role": collection_roles[name]["role"],
+                    "alias": collection_roles[name]["alias"],
                     "snapshot": str(snapshot_arcname),
-                    "points_estimate": getattr(info, "points_count", None),
+                    "points_estimate": points_count,
                     "snapshot_name": snapshot_name,
                     "snapshot_size": _extract_snapshot_size(snapshot),
                 }
@@ -531,8 +718,8 @@ def export_collections_bundle(collection_names: Optional[Iterable[str]] = None) 
     filename = f"qdrant-export-{stamp}.tar.gz"
     return bundle_buffer.getvalue(), {
         "filename": filename,
-        "collections": available,
-        "count": len(available),
+        "collections": selected_names,
+        "count": len(selected_names),
         "vector_store_files": vector_files,
         "snapshots": [
             entry.get("snapshot_name")
@@ -575,6 +762,9 @@ def _extract_snapshot_name(snapshot: Any) -> Optional[str]:
     if snapshot is None:
         return None
     if isinstance(snapshot, dict):
+        result = snapshot.get("result")
+        if isinstance(result, dict):
+            return _extract_snapshot_name(result)
         for key in ("name", "snapshot_name", "id"):
             candidate = snapshot.get(key)
             if candidate:
@@ -595,6 +785,9 @@ def _extract_snapshot_size(snapshot: Any) -> Optional[int]:
     if snapshot is None:
         return None
     if isinstance(snapshot, dict):
+        result = snapshot.get("result")
+        if isinstance(result, dict):
+            return _extract_snapshot_size(result)
         return snapshot.get("size") or snapshot.get("size_bytes")
     return getattr(snapshot, "size", None) or getattr(snapshot, "size_bytes", None)
 
@@ -693,32 +886,21 @@ def _delete_remote_snapshot(collection_name: str, snapshot_name: str) -> None:
         return
 
 
-def swap_collection_aliases(
-    logical_base: Optional[str],
-    new_collection_base: str,
-) -> None:
-    """Atomically repoint summary/content aliases to a new physical pair.
-
-    logical_base:
-        Base name used for deriving alias names. For the default corpus this
-        should be None so that aliases align with settings.qdrant_*_collection.
-    new_collection_base:
-        Base name used for deriving the new physical collections that should
-        become the active pair after the swap.
-    """
-    summary_alias, content_alias = derive_alias_names(logical_base)
-    new_summary, new_content = derive_collection_names(new_collection_base)
-
+def _apply_collection_aliases(alias_targets: Dict[str, str]) -> None:
     actions = []
-    for alias_name, target in ((summary_alias, new_summary), (content_alias, new_content)):
-        alias_exists = False
-        try:
-            qdrant.get_collection(alias_name)
-            alias_exists = True
-        except Exception:
-            alias_exists = False
-        if alias_exists:
+    current_aliases = _get_qdrant_alias_targets()
+    for alias_name, target in alias_targets.items():
+        current_target = current_aliases.get(alias_name)
+        if current_target == target:
+            continue
+        if current_target:
             actions.append({"delete_alias": {"alias_name": alias_name}})
+        else:
+            try:
+                qdrant.get_collection(alias_name)
+                actions.append({"delete_alias": {"alias_name": alias_name}})
+            except Exception:
+                pass
         actions.append({"create_alias": {"collection_name": target, "alias_name": alias_name}})
 
     if not actions:
@@ -742,8 +924,118 @@ def swap_collection_aliases(
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Nie udało się przełączyć aliasów kolekcji (base={logical_base}, new_base={new_collection_base}): {exc}",
+            detail=f"Nie udało się przełączyć aliasów kolekcji: {exc}",
         ) from exc
+
+
+def swap_collection_aliases(
+    logical_base: Optional[str],
+    new_collection_base: str,
+) -> None:
+    """Atomically repoint summary/content aliases to a new physical pair.
+
+    logical_base:
+        Base name used for deriving alias names. For the default corpus this
+        should be None so that aliases align with settings.qdrant_*_collection.
+    new_collection_base:
+        Base name used for deriving the new physical collections that should
+        become the active pair after the swap.
+    """
+    summary_alias, content_alias = derive_alias_names(logical_base)
+    new_summary, new_content = derive_collection_names(new_collection_base)
+    try:
+        _apply_collection_aliases({summary_alias: new_summary, content_alias: new_content})
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=(
+                f"Nie udało się przełączyć aliasów kolekcji "
+                f"(base={logical_base}, new_base={new_collection_base}): {exc.detail}"
+            ),
+        ) from exc
+
+
+def _collection_role_targets(collections: List[Any]) -> Dict[str, str]:
+    roles: Dict[str, str] = {}
+    for entry in collections:
+        if not isinstance(entry, dict):
+            raise HTTPException(status_code=400, detail="Zły format archiwum: wpis kolekcji musi być obiektem")
+        role = entry.get("role")
+        name = entry.get("name")
+        if role in {"summary", "content"} and isinstance(name, str) and name:
+            if role in roles and roles[role] != name:
+                raise HTTPException(status_code=400, detail=f"Archiwum zawiera wiele kolekcji dla roli '{role}'")
+            roles[role] = name
+    return roles
+
+
+def _validate_project_bundle_metadata(metadata: Dict[str, Any], collections: List[Any]) -> Dict[str, str]:
+    summary_alias, content_alias = derive_alias_names(None)
+    summary_base, content_base = derive_collection_names(None)
+    names = [
+        str((entry or {}).get("name"))
+        for entry in collections
+        if isinstance(entry, dict) and (entry or {}).get("name")
+    ]
+    unique_names = set(names)
+    if len(names) != 2 or len(unique_names) != 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Archiwum musi zawierać dokładnie aktywną parę kolekcji projektu (summary/content)",
+        )
+
+    project = metadata.get("project")
+    if isinstance(project, dict) and project:
+        project_name = project.get("collection_name")
+        if project_name != settings.collection_name:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Archiwum jest dla projektu '{project_name}', a bieżący projekt to "
+                    f"'{settings.collection_name}'"
+                ),
+            )
+
+        roles = _collection_role_targets(collections)
+        if set(roles) != {"summary", "content"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Archiwum projektu musi zawierać role kolekcji 'summary' i 'content'",
+            )
+
+        aliases = project.get("aliases") if isinstance(project.get("aliases"), dict) else {}
+        expected_alias_map = {
+            summary_alias: roles["summary"],
+            content_alias: roles["content"],
+        }
+        if aliases:
+            for alias_name, target in expected_alias_map.items():
+                if aliases.get(alias_name) != target:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Metadata archiwum nie zgadza się z kolekcją docelową aliasu '{alias_name}'",
+                    )
+
+        for entry in collections:
+            alias_name = entry.get("alias") if isinstance(entry, dict) else None
+            role = entry.get("role") if isinstance(entry, dict) else None
+            if role == "summary" and alias_name and alias_name != summary_alias:
+                raise HTTPException(status_code=400, detail=f"Nieoczekiwany alias kolekcji summary: {alias_name}")
+            if role == "content" and alias_name and alias_name != content_alias:
+                raise HTTPException(status_code=400, detail=f"Nieoczekiwany alias kolekcji content: {alias_name}")
+
+        return expected_alias_map
+
+    legacy_expected = {summary_base, content_base}
+    if unique_names != legacy_expected:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Archiwum nie zawiera metadata projektu i nie pasuje do bazowej pary "
+                f"kolekcji bieżącego projektu: {', '.join(sorted(legacy_expected))}"
+            ),
+        )
+    return {summary_alias: summary_base, content_alias: content_base}
 
 
 def import_collections_bundle(bundle: bytes, *, replace_existing: bool = True) -> Dict[str, Any]:
@@ -762,12 +1054,15 @@ def import_collections_bundle(bundle: bytes, *, replace_existing: bool = True) -
         collections = restored.get("collections") or []
         if not isinstance(collections, list):
             raise HTTPException(status_code=400, detail="Zły format archiwum: pole 'collections' musi być listą")
+        alias_targets = _validate_project_bundle_metadata(restored, collections)
 
         summary: Dict[str, Any] = {
             "restored": [],
             "skipped": [],
             "errors": [],
             "meta": restored.get("meta") or {},
+            "project": restored.get("project") or {"collection_name": settings.collection_name},
+            "aliases": {},
             "vector_store": {"restored": [], "base": str(settings.vector_store_dir)},
         }
 
@@ -849,6 +1144,13 @@ def import_collections_bundle(bundle: bytes, *, replace_existing: bool = True) -
             except Exception as exc:
                 logger.error("Nie udało się odtworzyć pliku indeksu '%s': %s", member.name, exc)
                 summary["errors"].append({"collection": None, "error": f"vector_store:{member.name}: {exc}"})
+
+        if not summary["errors"]:
+            try:
+                _apply_collection_aliases(alias_targets)
+                summary["aliases"] = alias_targets
+            except HTTPException as exc:
+                summary["errors"].append({"collection": None, "error": exc.detail})
 
     return summary
 

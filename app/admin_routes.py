@@ -47,7 +47,7 @@ ADMIN_OPERATION_SPECS: List[Dict[str, Any]] = [
         "id": "collections-export",
         "path": "/collections/export",
         "method": "POST",
-        "label": "Eksport kolekcji (plik .tar.gz)",
+        "label": "Eksport aktywnych kolekcji projektu (plik .tar.gz)",
         "body": "{}",
     },
     {

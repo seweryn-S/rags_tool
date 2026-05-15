@@ -948,14 +948,17 @@ def collections_init(req: InitCollectionsRequest):
     "/collections/export",
     include_in_schema=False,
     summary="Eksport kolekcji Qdrant",
-    description="Eksportuje wszystkie kolekcje do archiwum .tar.gz zawierającego snapshoty Qdrant oraz lokalne artefakty TF-IDF.",
+    description=(
+        "Eksportuje aktywne kolekcje bieżącego projektu do archiwum .tar.gz "
+        "zawierającego snapshoty Qdrant oraz lokalne artefakty TF-IDF."
+    ),
 )
-# Export all collections and TF‑IDF artifacts as a tar.gz bundle.
+# Export active project collections and TF‑IDF artifacts as a tar.gz bundle.
 def collections_export(req: CollectionsExportRequest):
-    """Export all Qdrant collections and local TF-IDF artifacts to tar.gz."""
+    """Export active project Qdrant collections and local TF-IDF artifacts."""
     if req.collection_names:
         logger.info(
-            "Parametr collection_names=%s został przesłany, ale eksport obejmuje wszystkie kolekcje.",
+            "Parametr collection_names=%s został przesłany, ale eksport obejmuje tylko aktywne kolekcje bieżącego projektu.",
             req.collection_names,
         )
     bundle, meta = export_collections_bundle(req.collection_names)
@@ -974,7 +977,9 @@ def collections_export(req: CollectionsExportRequest):
     include_in_schema=False,
     summary="Import kolekcji Qdrant",
     description=(
-        "Przyjmuje archiwum .tar.gz wygenerowane przez /collections/export (plik lub base64) i odtwarza kolekcje ze snapshotów Qdrant oraz indeksy TF-IDF."
+        "Przyjmuje archiwum .tar.gz wygenerowane przez /collections/export (plik lub base64), "
+        "weryfikuje zgodność z bieżącym projektem i odtwarza aktywne kolekcje ze snapshotów "
+        "Qdrant oraz indeksy TF-IDF."
     ),
 )
 # Import collections from an uploaded tar.gz bundle (multipart or raw body).

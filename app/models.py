@@ -31,7 +31,10 @@ class InitCollectionsRequest(BaseModel):
 class CollectionsExportRequest(BaseModel):
     collection_names: Optional[List[str]] = Field(
         default=None,
-        description="Deprecated filter; eksporter zawsze pobiera wszystkie kolekcje.",
+        description=(
+            "Deprecated filter; eksporter zawsze pobiera tylko aktywne kolekcje "
+            "bieżącego projektu."
+        ),
     )
 
 

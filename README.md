@@ -1,4 +1,9 @@
-# rags_tool (2.45.0)
+# rags_tool (2.45.1)
+
+## Nowości w 2.45.1
+- Export/import: `/collections/export` obejmuje teraz wyłącznie aktywną parę kolekcji bieżącego projektu, czyli fizyczne kolekcje wskazywane przez aliasy `*_summaries_active` / `*_content_active`. Obce projekty i historyczne wersje nie trafiają do archiwum.
+- Import weryfikuje metadata projektu przed odtworzeniem danych. Archiwa dla innego `COLLECTION_NAME` albo starsze archiwa zawierające obce kolekcje są odrzucane błędem `400`.
+- Po poprawnym imporcie aliasy aktywne projektu są przełączane na przywróconą parę kolekcji.
 
 ## Nowości w 2.45.0
 - Qdrant: wprowadzono parę aliasów `*_summaries_active` / `*_content_active` dla głównego korpusu (i dodatkowych baz), dzięki czemu pełny reindex buduje nową wersję kolekcji w tle, a po zakończeniu aliasy są atomowo przełączane na nową parę (blue‑green). Stara para kolekcji pozostaje w Qdrant i może zostać skasowana ręcznie po weryfikacji.
@@ -338,13 +343,13 @@ PY
 
 ## Nowości w 1.1.0
 
-- Eksport zawsze obejmuje wszystkie kolekcje Qdrant oraz artefakty TF-IDF z katalogu `VECTOR_STORE_DIR`; dane trafiają do archiwum `.tar.gz` kompatybilnego z nowym importem.
+- Eksport obejmował wtedy pełną listę kolekcji Qdrant oraz artefakty TF-IDF z katalogu `VECTOR_STORE_DIR`; dane trafiały do archiwum `.tar.gz` kompatybilnego z nowym importem. Od 2.45.1 eksport jest ograniczony do aktywnej pary bieżącego projektu.
 - Import odtwarza kolekcje i pliki indeksów, opcjonalnie zastępując istniejące zasoby (w tym katalog TF-IDF) po ustawieniu `replace_existing=true`.
 - Panel Admin UI aktualizuje helper eksportu/importu do nowego formatu (archiwum `.tar.gz`).
 
 ## Nowości w 1.0.0
 
-- Panel Admin UI otrzymał dwa helpery: eksport wszystkich kolekcji Qdrant do pojedynczego archiwum JSON.gz (`/collections/export`) oraz import plików wygenerowanych w ten sposób (`/collections/import`) z opcją zastąpienia istniejących kolekcji.
+- Panel Admin UI otrzymał dwa helpery: eksport pełnej listy kolekcji Qdrant do pojedynczego archiwum JSON.gz (`/collections/export`) oraz import plików wygenerowanych w ten sposób (`/collections/import`) z opcją zastąpienia istniejących kolekcji.
 - UI automatycznie pobiera plik eksportu (bezpośredni download z przeglądarki) i przyjmuje dane importu w formacie base64.
 
 ## Nowości w 0.9.5
